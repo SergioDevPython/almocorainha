@@ -4,14 +4,72 @@ import pandas as pd
 from datetime import datetime, date
 from fpdf import FPDF
 
-# Configuração da página
+# -------------------------------------------------------------------
+# CONFIGURAÇÃO E CSS MOBILE FIRST
+# -------------------------------------------------------------------
 st.set_page_config(
     page_title="ESCOLA MUNICIPAL RAINHA DA PAZ",
     page_icon="🏫",
-    layout="wide"
+    layout="centered",
+    initial_sidebar_state="collapsed"
 )
 
-# Classe para geração do PDF com cabeçalho e rodapé personalizados
+# Estilização CSS para transformar em interface de aplicativo mobile
+st.markdown("""
+<style>
+    /* Estilização geral para telas menores */
+    .stApp {
+        background-color: #f8f9fa;
+    }
+    
+    /* Botões grandes e fáceis de tocar com o polegar */
+    div.stButton > button {
+        width: 100% !important;
+        height: 60px !important;
+        font-size: 18px !important;
+        font-weight: bold !important;
+        border-radius: 12px !important;
+        margin-bottom: 8px !important;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.08) !important;
+    }
+    
+    /* Aumenta áreas de clique das caixas de seleção (Checkboxes) no celular */
+    .stCheckbox {
+        background-color: #ffffff;
+        padding: 12px 16px;
+        border-radius: 10px;
+        border: 1px solid #e9ecef;
+        margin-bottom: 8px;
+    }
+    
+    .stCheckbox label p {
+        font-size: 18px !important;
+        font-weight: 500 !important;
+        color: #212529 !important;
+    }
+    
+    /* Melhoria visual para formulários e seletores */
+    .stSelectbox label, .stTextInput label, .stDateInput label {
+        font-size: 16px !important;
+        font-weight: bold !important;
+        color: #343a40 !important;
+    }
+
+    /* Cartões de métrica */
+    div[data-testid="stMetric"] {
+        background-color: #ffffff;
+        padding: 12px;
+        border-radius: 10px;
+        border: 1px solid #e9ecef;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+        text-align: center;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# -------------------------------------------------------------------
+# CLASSE GERADORA DE PDF
+# -------------------------------------------------------------------
 class PDFRelatorio(FPDF):
     def header(self):
         self.set_font('Helvetica', 'B', 14)
@@ -26,32 +84,28 @@ class PDFRelatorio(FPDF):
         self.set_text_color(128, 128, 128)
         self.cell(0, 10, 'Desenvolvido por Sergio Santos', align='C')
 
-def gerar_pdf_bytes(df_relatorio, turma, data_inicio_str, data_fim_str):
+def gerar_pdf_bytes(df_relatorio, turma, data_inicio_str, data_fim_str, total_nao_almocaram):
     pdf = PDFRelatorio(orientation='P', unit='mm', format='A4')
     pdf.add_page()
     
-    # Informações da Turma e Período
     pdf.set_font('Helvetica', 'B', 10)
     pdf.cell(0, 6, f"Turma: {turma}  |  Periodo: {data_inicio_str} a {data_fim_str}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"Total de refeicoes NAO realizadas na turma: {total_nao_almocaram}", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(4)
     
-    # Tabela - Cabeçalho
     pdf.set_font('Helvetica', 'B', 9)
     pdf.set_fill_color(230, 230, 230)
     
-    col_widths = [75, 25, 25, 28, 35]  # Soma = 188mm (cabe bem na A4)
+    col_widths = [75, 25, 25, 28, 35]
     headers = ["Aluno", "Dias Reg.", "Almocou", "Nao Almocou", "% Presenca"]
     
     for i, h in enumerate(headers):
         pdf.cell(col_widths[i], 8, h, border=1, align='C', fill=True)
     pdf.ln()
     
-    # Tabela - Dados
     pdf.set_font('Helvetica', '', 9)
     for _, row in df_relatorio.iterrows():
-        # Remove caracteres especiais/acentos para compatibilidade com FPDF padrão
-        nome_aluno = row["Aluno"].encode('latin-1', 'replace').decode('latin-1')
-        
+        nome_aluno = str(row["Aluno"]).encode('latin-1', 'replace').decode('latin-1')
         pdf.cell(col_widths[0], 7, nome_aluno, border=1)
         pdf.cell(col_widths[1], 7, str(row["Dias Registrados"]), border=1, align='C')
         pdf.cell(col_widths[2], 7, str(row["Almoçou (Dias)"]), border=1, align='C')
@@ -61,8 +115,9 @@ def gerar_pdf_bytes(df_relatorio, turma, data_inicio_str, data_fim_str):
         
     return bytes(pdf.output())
 
-
-# Conexão com MongoDB Atlas
+# -------------------------------------------------------------------
+# BANCO DE DADOS E ESTADO DA SESSÃO
+# -------------------------------------------------------------------
 @st.cache_resource
 def init_connection():
     return pymongo.MongoClient(st.secrets["MONGO_URI"])
@@ -72,83 +127,65 @@ db = client["controle_almoco"]
 collection_alunos = db["alunos"]
 collection_frequencia = db["frequencia"]
 
-# Título Principal
-st.title("🏫 ESCOLA MUNICIPAL RAINHA DA PAZ")
-st.subheader("Sistema de Controle de Alimentação Escolar")
+# Estado inicial da tela do menu principal
+if "tela" not in st.session_state:
+    st.session_state.tela = "home"
+
+# Lista de turmas do 1º A ao 5º C
+turmas_disponiveis = [f"{ano}º {turma}" for ano in range(1, 6) for turma in ['A', 'B', 'C']]
+
+# -------------------------------------------------------------------
+# CABEÇALHO DO APP
+# -------------------------------------------------------------------
+st.markdown("<h2 style='text-align: center; color: #1E3A8A; margin-bottom: 0;'>🏫 ESCOLA MUNICIPAL RAINHA DA PAZ</h2>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: #6B7280; margin-top: 0;'>Controle de Alimentação Escolar</p>", unsafe_allow_html=True)
 st.markdown("---")
 
-# Gerar lista de turmas (1º A ao 5º C)
-turmas_disponiveis = []
-for ano in range(1, 6):
-    for turma in ['A', 'B', 'C']:
-        turmas_disponiveis.append(f"{ano}º {turma}")
-
-# Navegação Lateral
-menu = st.sidebar.radio(
-    "Navegação",
-    ["📋 Registro Diário (Almoço)", "➕ Cadastrar Alunos", "📊 Relatórios e Impressão"]
-)
-
 # -------------------------------------------------------------------
-# ABA 1: CADASTRAR ALUNOS
+# TELA INICIAL (MENU COM BOTÕES GRANDES)
 # -------------------------------------------------------------------
-if menu == "➕ Cadastrar Alunos":
-    st.header("Cadastrar Novo Aluno")
+if st.session_state.tela == "home":
+    st.subheader("Selecione uma opção:")
     
-    with st.form("form_cadastro"):
-        nome_aluno = st.text_input("Nome do Aluno:")
-        turma_aluno = st.selectbox("Turma:", turmas_disponiveis)
-        submitted = st.form_submit_button("Salvar Aluno")
+    if st.button("📋 REGISTRO DIÁRIO DE ALMOÇO", type="primary"):
+        st.session_state.tela = "registro"
+        st.rerun()
         
-        if submitted:
-            if nome_aluno.strip() != "":
-                collection_alunos.insert_one({
-                    "nome": nome_aluno.strip(),
-                    "turma": turma_aluno
-                })
-                st.success(f"Aluno {nome_aluno} cadastrado na turma {turma_aluno} com sucesso!")
-            else:
-                st.warning("Por favor, digite o nome do aluno.")
-
-    st.markdown("---")
-    st.subheader("Alunos Cadastrados")
-    turma_filtro = st.selectbox("Filtrar por Turma para visualizar:", turmas_disponiveis)
-    alunos_turma = list(collection_alunos.find({"turma": turma_filtro}))
-    
-    if alunos_turma:
-        df_alunos = pd.DataFrame(alunos_turma)
-        st.dataframe(df_alunos[["nome", "turma"]], use_container_width=True)
-    else:
-        st.info("Nenhum aluno cadastrado nesta turma.")
+    if st.button("➕ CADASTRAR ALUNOS"):
+        st.session_state.tela = "cadastro"
+        st.rerun()
+        
+    if st.button("📊 RELATÓRIOS E IMPRESSÃO"):
+        st.session_state.tela = "relatorios"
+        st.rerun()
 
 # -------------------------------------------------------------------
-# ABA 2: REGISTRO DIÁRIO DE ALMOÇO (CHECKLIST)
+# TELA 1: REGISTRO DIÁRIO DE ALMOÇO (CHECKLIST)
 # -------------------------------------------------------------------
-elif menu == "📋 Registro Diário (Almoço)":
-    st.header("Registro Diário de Alimentação")
+elif st.session_state.tela == "registro":
+    if st.button("⬅️ Voltar ao Menu"):
+        st.session_state.tela = "home"
+        st.rerun()
+        
+    st.header("📋 Registro Diário")
     
-    col1, col2 = st.columns(2)
-    with col1:
-        turma_sel = st.selectbox("Selecione a Turma:", turmas_disponiveis)
-    with col2:
-        data_sel = st.date_input("Data do Registro:", date.today())
-        data_str = data_sel.strftime("%Y-%m-%d")
+    turma_sel = st.selectbox("Selecione a Turma:", turmas_disponiveis)
+    data_sel = st.date_input("Data do Registro:", date.today())
+    data_str = data_sel.strftime("%Y-%m-%d")
 
     alunos = list(collection_alunos.find({"turma": turma_sel}).sort("nome", 1))
     
     if not alunos:
         st.warning("Nenhum aluno cadastrado nesta turma.")
     else:
-        st.write("Marque a caixa dos alunos que **NÃO ALMOÇARAM** hoje na escola:")
+        st.info("Marque APENAS os alunos que **NÃO ALMOÇARAM** hoje:")
         
-        # Buscar registros do dia para pré-preencher
         registro_existente = collection_frequencia.find_one({
             "turma": turma_sel,
             "data": data_str
         })
         
         nao_almocaram_salvos = registro_existente["nao_almocaram"] if registro_existente else []
-        
         nao_almocaram_atuais = []
         
         with st.form("form_almoco"):
@@ -164,7 +201,7 @@ elif menu == "📋 Registro Diário (Almoço)":
                 if marcado:
                     nao_almocaram_atuais.append(id_str)
             
-            salvar = st.form_submit_button("Salvar Frequência de Almoço")
+            salvar = st.form_submit_button("💾 SALVAR FREQUÊNCIA", type="primary")
             
             if salvar:
                 collection_frequencia.update_one(
@@ -176,40 +213,75 @@ elif menu == "📋 Registro Diário (Almoço)":
                     }},
                     upsert=True
                 )
-                st.success("Registro de almoço salvo com sucesso!")
+                st.success("✅ Registro de almoço salvo com sucesso!")
 
 # -------------------------------------------------------------------
-# ABA 3: RELATÓRIOS, PORCENTAGEM E IMPRESSÃO
+# TELA 2: CADASTRAR ALUNOS
 # -------------------------------------------------------------------
-elif menu == "📊 Relatórios e Impressão":
-    st.header("Relatório Semanal / Consulta de Almoço")
+elif st.session_state.tela == "cadastro":
+    if st.button("⬅️ Voltar ao Menu"):
+        st.session_state.tela = "home"
+        st.rerun()
+        
+    st.header("➕ Cadastrar Aluno")
+    
+    with st.form("form_cadastro"):
+        nome_aluno = st.text_input("Nome do Aluno:")
+        turma_aluno = st.selectbox("Turma:", turmas_disponiveis)
+        submitted = st.form_submit_button("💾 CADASTRAR ALUNO", type="primary")
+        
+        if submitted:
+            if nome_aluno.strip() != "":
+                collection_alunos.insert_one({
+                    "nome": nome_aluno.strip(),
+                    "turma": turma_aluno
+                })
+                st.success(f"✅ {nome_aluno} cadastrado na turma {turma_aluno}!")
+            else:
+                st.warning("Por favor, digite o nome do aluno.")
+
+    st.markdown("---")
+    st.subheader("Alunos Cadastrados")
+    turma_filtro = st.selectbox("Filtrar Turma:", turmas_disponiveis)
+    alunos_turma = list(collection_alunos.find({"turma": turma_filtro}))
+    
+    if alunos_turma:
+        df_alunos = pd.DataFrame(alunos_turma)
+        st.dataframe(df_alunos[["nome", "turma"]], use_container_width=True)
+    else:
+        st.info("Nenhum aluno cadastrado nesta turma.")
+
+# -------------------------------------------------------------------
+# TELA 3: RELATÓRIOS E IMPRESSÃO PDF
+# -------------------------------------------------------------------
+elif st.session_state.tela == "relatorios":
+    if st.button("⬅️ Voltar ao Menu"):
+        st.session_state.tela = "home"
+        st.rerun()
+        
+    st.header("📊 Relatório Semanal")
     
     turma_rel = st.selectbox("Selecione a Turma:", turmas_disponiveis)
-    
-    col_d1, col_d2 = st.columns(2)
-    with col_d1:
-        data_inicio = st.date_input("Data Inicial:", date.today() - pd.Timedelta(days=7))
-    with col_d2:
-        data_fim = st.date_input("Data Final:", date.today())
+    data_inicio = st.date_input("Data Inicial:", date.today() - pd.Timedelta(days=7))
+    data_fim = st.date_input("Data Final:", date.today())
         
-    if st.button("Gerar Relatório"):
+    if st.button("🔍 GERAR RELATÓRIO", type="primary"):
         str_inicio = data_inicio.strftime("%Y-%m-%d")
         str_fim = data_fim.strftime("%Y-%m-%d")
         
-        # Buscar dias registrados no período
         registros = list(collection_frequencia.find({
             "turma": turma_rel,
             "data": {"$gte": str_inicio, "$lte": str_fim}
         }))
         
         alunos = list(collection_alunos.find({"turma": turma_rel}).sort("nome", 1))
-        
         total_dias = len(registros)
         
         if total_dias == 0:
             st.warning("Nenhum registro encontrado no período selecionado.")
         else:
             relatorio_data = []
+            soma_nao_almocaram_turma = 0
             
             for aluno in alunos:
                 id_str = str(aluno["_id"])
@@ -222,6 +294,7 @@ elif menu == "📊 Relatórios e Impressão":
                     else:
                         dias_almocou += 1
                 
+                soma_nao_almocaram_turma += dias_nao_almocou
                 pct_almocou = (dias_almocou / total_dias) * 100
                 
                 relatorio_data.append({
@@ -234,43 +307,38 @@ elif menu == "📊 Relatórios e Impressão":
             
             df_relatorio = pd.DataFrame(relatorio_data)
             
-            st.subheader(f"Relatório da Turma {turma_rel} ({data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')})")
+            st.markdown(f"### Turma {turma_rel}")
+            st.caption(f"Período: {data_inicio.strftime('%d/%m/%Y')} até {data_fim.strftime('%d/%m/%Y')}")
+            
+            st.metric("Total de Alunos", len(alunos))
+            st.metric("Dias com Registro", total_dias)
+            st.metric("Ausências no Almoço", soma_nao_almocaram_turma)
+            
+            st.markdown("---")
             st.dataframe(df_relatorio, use_container_width=True)
             
-            st.markdown("### 🖨️ Opções de Download / Impressão")
-            col_down1, col_down2 = st.columns(2)
+            pdf_bytes = gerar_pdf_bytes(
+                df_relatorio, 
+                turma_rel, 
+                data_inicio.strftime('%d/%m/%Y'), 
+                data_fim.strftime('%d/%m/%Y'),
+                soma_nao_almocaram_turma
+            )
             
-            # Botão 1: PDF
-            with col_down1:
-                pdf_bytes = gerar_pdf_bytes(
-                    df_relatorio, 
-                    turma_rel, 
-                    data_inicio.strftime('%d/%m/%Y'), 
-                    data_fim.strftime('%d/%m/%Y')
-                )
-                st.download_button(
-                    label="📄 Baixar Relatório em PDF",
-                    data=pdf_bytes,
-                    file_name=f"relatorio_almoco_{turma_rel}_{str_inicio}.pdf",
-                    mime="application/pdf"
-                )
-            
-            # Botão 2: CSV (Excel)
-            with col_down2:
-                csv = df_relatorio.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📊 Baixar Planilha (CSV)",
-                    data=csv,
-                    file_name=f"relatorio_almoco_{turma_rel}_{str_inicio}.csv",
-                    mime="text/csv"
-                )
+            st.download_button(
+                label="📄 BAIXAR RELATÓRIO PDF",
+                data=pdf_bytes,
+                file_name=f"relatorio_{turma_rel}_{str_inicio}.pdf",
+                mime="application/pdf",
+                type="primary"
+            )
 
 # -------------------------------------------------------------------
-# RODAPÉ
+# RODAPÉ Padrão
 # -------------------------------------------------------------------
 st.markdown("---")
 st.markdown(
-    "<div style='text-align: center; color: gray;'>"
+    "<div style='text-align: center; color: #888888; font-size: 14px; padding-bottom: 20px;'>"
     "Desenvolvido por Sergio Santos"
     "</div>",
     unsafe_allow_html=True
