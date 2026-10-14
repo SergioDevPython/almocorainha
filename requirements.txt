@@ -3,3 +3,4 @@ pymongo
 dnspython
 pandas
 fpdf2
+streamlit-autorefresh
